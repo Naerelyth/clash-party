@@ -14,11 +14,11 @@ import {
 } from '../config'
 import { DEFAULT_MIHOMO_PORTS } from '../../shared/appConfig'
 import icoIcon from '../../../resources/icon.ico?asset'
-import icoIconBlue from '../../../resources/icon_blue.ico?asset'
+import icoIconInvert from '../../../resources/icon_invert.ico?asset'
 import icoIconRed from '../../../resources/icon_red.ico?asset'
 import icoIconGreen from '../../../resources/icon_green.ico?asset'
 import pngIcon from '../../../resources/icon.png?asset'
-import pngIconBlue from '../../../resources/icon_blue.png?asset'
+import pngIconInvert from '../../../resources/icon_invert.png?asset'
 import pngIconRed from '../../../resources/icon_red.png?asset'
 import pngIconGreen from '../../../resources/icon_green.png?asset'
 import templateIcon from '../../../resources/iconTemplate.png?asset'
@@ -47,7 +47,7 @@ export let tray: Tray | null = null
 let trayMenu: Menu | null = null
 // macOS 流量显示状态，避免异步读取配置导致的时序问题
 let macTrafficIconEnabled = false
-type TrayIconStatus = 'white' | 'blue' | 'green' | 'red'
+type TrayIconStatus = 'blue' | 'invert' | 'green' | 'red'
 type TrayImage = Electron.NativeImage | string
 type CustomTrayIconKey = keyof ICustomTrayIcons
 const customTrayIconSize = 16
@@ -564,15 +564,15 @@ export async function hideDockIcon(): Promise<void> {
 const getIconPaths = (): Record<TrayIconStatus, string> => {
   if (process.platform === 'win32') {
     return {
-      white: icoIcon,
-      blue: icoIconBlue,
+      blue: icoIcon,
+      invert: icoIconInvert,
       green: icoIconGreen,
       red: icoIconRed
     }
   } else {
     return {
-      white: pngIcon,
-      blue: pngIconBlue,
+      blue: pngIcon,
+      invert: pngIconInvert,
       green: pngIconGreen,
       red: pngIconRed
     }
@@ -673,13 +673,13 @@ function hasCustomTrayIcons(customTrayIcons?: ICustomTrayIcons): boolean {
 
 function getCustomTrayIconKey(status: TrayIconStatus): CustomTrayIconKey {
   switch (status) {
-    case 'blue':
+    case 'invert':
       return 'sysProxy'
     case 'green':
       return 'tun'
     case 'red':
       return 'tun'
-    case 'white':
+    case 'blue':
     default:
       return 'off'
   }
@@ -775,7 +775,7 @@ export function updateTrayIconImmediate(sysProxyEnabled: boolean, tunEnabled: bo
         await updateTrayToolTip(sysProxyEnabled, tunEnabled, false)
         return
       }
-      const iconPath = disableTrayIconColor ? iconPaths.white : iconPaths[status]
+      const iconPath = disableTrayIconColor ? iconPaths.blue : iconPaths[status]
       setTrayImage(iconPath)
       await updateTrayToolTip(sysProxyEnabled, tunEnabled, false)
     } catch {
@@ -804,7 +804,7 @@ export async function updateTrayIcon(): Promise<void> {
       await updateTrayToolTip(undefined, undefined, false)
       return
     }
-    const iconPath = disableTrayIconColor ? iconPaths.white : iconPaths[status]
+    const iconPath = disableTrayIconColor ? iconPaths.blue : iconPaths[status]
     setTrayImage(iconPath)
     await updateTrayToolTip(undefined, undefined, false)
   } catch {
