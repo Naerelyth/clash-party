@@ -23,7 +23,7 @@ vi.mock('../utils/chromeRequest', () => ({ get: vi.fn() }))
 vi.mock('./controledMihomo', () => ({ getControledMihomoConfig: vi.fn() }))
 
 beforeEach(() => {
-  testDir = mkdtempSync(join(tmpdir(), 'clash-party-override-test-'))
+  testDir = mkdtempSync(join(tmpdir(), 'mihomo-party-override-test-'))
 })
 
 afterEach(() => {

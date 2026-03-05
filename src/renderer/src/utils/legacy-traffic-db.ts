@@ -15,7 +15,7 @@ import {
   type TrafficUsageSample
 } from '../../../shared/trafficUsage'
 
-const DB_NAME = 'clashparty_db'
+const DB_NAME = 'mihomoparty_db'
 const DB_VERSION = 2
 const LEGACY_STORE = 'data_usage_logs'
 const USAGE_STORE = 'traffic_usage_rollups'
