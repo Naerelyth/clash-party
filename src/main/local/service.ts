@@ -290,7 +290,7 @@ export async function exportLocalConfig(): Promise<LocalPreview & { path?: strin
   if (preview.errors.length) return preview
   const { canceled, filePath } = await dialog.showSaveDialog({
     title: '导出配置',
-    defaultPath: path.join(app.getPath('documents'), 'clash-party-config.yaml'),
+    defaultPath: path.join(app.getPath('documents'), 'mihomo-party-config.yaml'),
     filters: [{ name: 'YAML', extensions: ['yaml', 'yml'] }]
   })
   if (canceled || !filePath) return preview

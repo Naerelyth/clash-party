@@ -233,7 +233,7 @@ const App: React.FC = () => {
                 className="sider-item-label text-lg font-bold"
                 aria-hidden={!siderExpandedOnHover}
               >
-                Clash Party
+                Mihomo Party
               </span>
             </div>
             <Suspense fallback={<div className="min-h-0 flex-1" />}>
@@ -266,7 +266,7 @@ const App: React.FC = () => {
               >
                 <div className="flex ml-1">
                   <MihomoIcon className="h-8 leading-8 text-lg mx-px" />
-                  <h3 className="text-lg font-bold leading-8">Clash Party</h3>
+                  <h3 className="text-lg font-bold leading-8">ihomo Party</h3>
                 </div>
                 <UpdaterButton />
                 <Button

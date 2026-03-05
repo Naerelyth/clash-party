@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Reference provider gateway for the clash-party airport-plugin v2 browser-login model",
+  "description": "Reference provider gateway for the mihomo-party airport-plugin v2 browser-login model",
   "bin": {
     "cpx-admin": "./admin.mjs"
   },
