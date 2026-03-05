@@ -1,5 +1,5 @@
 appId: party.mihomo.app
-productName: Clash Party
+productName: mihomo-party
 directories:
   buildResources: build
 files:
@@ -21,23 +21,23 @@ extraResources:
   - from: './extra/'
     to: ''
 protocols:
-  name: 'Clash Party URI Scheme'
+  name: 'Mihomo Party URI Scheme'
   schemes:
     - 'clash'
     - 'mihomo'
 fileAssociations:
   - ext: 'cpx'
-    name: 'Clash Party Plugin'
-    description: 'Clash Party airport plugin descriptor'
-    mimeType: 'application/x-clash-party-plugin'
+    name: 'Mihomo Party Plugin'
+    description: 'Mihomo Party airport plugin descriptor'
+    mimeType: 'application/x-mihomo-party-plugin'
     role: 'Viewer'
 win:
   target:
     - nsis
     - 7z
-  artifactName: clash-party-windows-${version}-${arch}-portable.${ext}
+  artifactName: ${name}-windows-${version}-${arch}-portable.${ext}
 nsis:
-  artifactName: clash-party-windows-${version}-${arch}-setup.${ext}
+  artifactName: ${name}-windows-${version}-${arch}-setup.${ext}
   uninstallDisplayName: ${productName}
   allowToChangeInstallationDirectory: true
   oneClick: false
@@ -55,7 +55,7 @@ mac:
     - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
   notarize: false
-  artifactName: clash-party-macos-${version}-${arch}.${ext}
+  artifactName: ${name}-macos-${version}-${arch}.${ext}
 pkg:
   allowAnywhere: false
   allowCurrentUserHome: false
@@ -68,7 +68,7 @@ linux:
   icon: build/icon.png
   desktop:
     entry:
-      Name: Clash Party
+      Name: Mihomo Party
       GenericName: Proxy Client
       Comment: A GUI client based on Mihomo
       MimeType: 'x-scheme-handler/clash;x-scheme-handler/mihomo'
@@ -81,7 +81,7 @@ linux:
     - pacman
   maintainer: mihomo-party-org
   category: Utility
-  artifactName: clash-party-linux-${version}-${arch}.${ext}
+  artifactName: ${name}-linux-${version}-${arch}.${ext}
 deb:
   afterInstall: 'build/linux/postinst'
   afterRemove: 'build/linux/postuninst'
@@ -108,6 +108,6 @@ pacman:
     - at-spi2-core
     - util-linux-libs
     - libsecret
-  artifactName: clash-party-linux-${version}-${arch}.pkg.tar.zst
+  artifactName: mihomo-party-linux-${version}-${arch}.pkg.tar.zst
 npmRebuild: true
 publish: []
