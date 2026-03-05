@@ -15,7 +15,7 @@ import {
   type TrafficUsageSample
 } from '../../../shared/trafficUsage'
 
-const DB_NAME = 'clashparty_db'
+const DB_NAME = 'mihomoparty_db'
 const DB_VERSION = 2
 const LEGACY_STORE = 'data_usage_logs'
 const USAGE_STORE = 'traffic_usage_rollups'
@@ -450,7 +450,8 @@ class LegacyTrafficUsageDatabase {
     const database = await this.open()
     const transaction = database.transaction(META_STORE, 'readonly')
     const stored = (await requestResult(transaction.objectStore(META_STORE).get(MIGRATION_KEY))) as
-      MigrationState | undefined
+      | MigrationState
+      | undefined
     await transactionComplete(transaction)
 
     if (stored?.complete) return stored

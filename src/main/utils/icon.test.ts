@@ -40,10 +40,10 @@ beforeEach(() => {
   Object.defineProperty(process, 'platform', { configurable: true, value: 'darwin' })
   Object.defineProperty(process, 'resourcesPath', {
     configurable: true,
-    value: '/tmp/clash-party-resources'
+    value: '/tmp/mihomo-party-resources'
   })
 
-  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clash-party-icon-'))
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mihomo-party-icon-'))
   outerApp = path.join(tempDir, 'Browser.app')
   helperExecutable = path.join(
     outerApp,
@@ -84,7 +84,7 @@ describe('getIconDataURL on macOS', () => {
 
     expect(execFile).toHaveBeenCalledWith(
       path.join(
-        '/tmp/clash-party-resources',
+        '/tmp/mihomo-party-resources',
         'app.asar.unpacked',
         'node_modules',
         'file-icon',

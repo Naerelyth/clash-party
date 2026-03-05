@@ -8,7 +8,7 @@ import { findPluginFile, readPluginFile } from './file'
 let tempDir: string | undefined
 
 async function tempFile(name: string, content: string | Buffer): Promise<string> {
-  tempDir ??= await mkdtemp(join(tmpdir(), 'clash-party-cpx-'))
+  tempDir ??= await mkdtemp(join(tmpdir(), 'mihomo-party-cpx-'))
   const filePath = join(tempDir, name)
   await writeFile(filePath, content)
   return filePath
