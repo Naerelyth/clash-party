@@ -661,19 +661,19 @@ export const TunStatus = async (): Promise<boolean> => {
 export function calculateTrayIconStatus(
   sysProxyEnabled: boolean,
   tunEnabled: boolean
-): 'white' | 'blue' | 'green' | 'red' {
+): 'blue' | 'invert' | 'green' | 'red' {
   if (sysProxyEnabled && tunEnabled) {
     return 'red' // 系统代理 + TUN 同时启用（警告状态）
   } else if (sysProxyEnabled) {
-    return 'blue' // 仅系统代理启用
+    return 'invert' // 仅系统代理启用
   } else if (tunEnabled) {
     return 'green' // 仅 TUN 启用
   } else {
-    return 'white' // 全关
+    return 'blue' // 全关
   }
 }
 
-export async function getTrayIconStatus(): Promise<'white' | 'blue' | 'green' | 'red'> {
+export async function getTrayIconStatus(): Promise<'blue' | 'invert' | 'green' | 'red'> {
   const [sysProxyEnabled, tunEnabled] = await Promise.all([SysProxyStatus(), TunStatus()])
   return calculateTrayIconStatus(sysProxyEnabled, tunEnabled)
 }
