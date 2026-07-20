@@ -1,126 +1,12 @@
 import { join } from 'path'
-import { readFileSync } from 'fs'
-import { BrowserWindow, Menu, screen, shell } from 'electron'
+import { BrowserWindow, Menu, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
+import windowStateKeeper from 'electron-window-state'
 import icon from '../../resources/icon.png?asset'
 import { getAppConfig } from './config'
 import { quitWithoutCore } from './core/manager'
 import { hideDockIcon, showDockIcon } from './resolve/tray'
-import { dataDir } from './utils/dirs'
 import { mainWindowLogger } from './utils/logger'
-import { atomicWriteFileSync } from './utils/safeFile'
-
-interface WindowState {
-  width: number
-  height: number
-  x?: number
-  y?: number
-  isMaximized?: boolean
-}
-
-const WINDOW_STATE_SAVE_DELAY = 100
-
-// 内存态，最大化期间保留上次普通尺寸（#1954）。
-let windowState: WindowState = { width: 800, height: 600 }
-let saveStateTimer: NodeJS.Timeout | null = null
-
-function windowStateFile(): string {
-  return join(dataDir(), 'window-state.json')
-}
-
-// 拒绝 NaN/Infinity/0/负/小数；坐标副屏可为负。
-function isValidSize(n: unknown): n is number {
-  return typeof n === 'number' && Number.isInteger(n) && n > 0
-}
-
-function isValidCoord(n: unknown): n is number {
-  return typeof n === 'number' && Number.isInteger(n)
-}
-
-function loadWindowState(): WindowState {
-  try {
-    const parsed = JSON.parse(readFileSync(windowStateFile(), 'utf-8')) as Partial<WindowState>
-    if (isValidSize(parsed.width) && isValidSize(parsed.height)) {
-      return {
-        width: parsed.width,
-        height: parsed.height,
-        x: isValidCoord(parsed.x) ? parsed.x : undefined,
-        y: isValidCoord(parsed.y) ? parsed.y : undefined,
-        isMaximized: parsed.isMaximized === true
-      }
-    }
-  } catch {
-    // 缺失/损坏，回退默认
-  }
-  return { width: 800, height: 600 }
-}
-
-function isNormalWindow(window: BrowserWindow): boolean {
-  return !window.isMaximized() && !window.isMinimized() && !window.isFullScreen()
-}
-
-// getContentBounds（非 getBounds）避免 Windows 小数 DPI 每次重启变大（#1857）。
-// trackBounds=false 只记最大化标志，因 unmaximize 时尺寸未稳定会返回满屏值（#1954）。
-function updateWindowState(window: BrowserWindow, trackBounds = true): void {
-  if (window.isDestroyed()) return
-  try {
-    if (trackBounds && isNormalWindow(window)) {
-      const bounds = window.getContentBounds()
-      windowState.width = bounds.width
-      windowState.height = bounds.height
-      windowState.x = bounds.x
-      windowState.y = bounds.y
-    }
-    windowState.isMaximized = window.isMaximized()
-  } catch {
-    // 窗口销毁中
-  }
-}
-
-function persistWindowState(): void {
-  try {
-    atomicWriteFileSync(windowStateFile(), JSON.stringify(windowState))
-  } catch (error) {
-    void mainWindowLogger.error('Failed to persist window state', error)
-  }
-}
-
-function clearSaveStateTimer(): void {
-  if (saveStateTimer) {
-    clearTimeout(saveStateTimer)
-    saveStateTimer = null
-  }
-}
-
-// 同步兜底，用于关窗/退出（Wayland 可能不触发 resize）。
-function saveWindowState(window: BrowserWindow): void {
-  clearSaveStateTimer()
-  updateWindowState(window)
-  persistWindowState()
-}
-
-// 防抖，用于 resize/move/maximize/unmaximize。
-function scheduleSaveWindowState(window: BrowserWindow, trackBounds = true): void {
-  clearSaveStateTimer()
-  saveStateTimer = setTimeout(() => {
-    saveStateTimer = null
-    if (window.isDestroyed()) return // 崩溃重建后旧回调
-    updateWindowState(window, trackBounds)
-    persistWindowState()
-  }, WINDOW_STATE_SAVE_DELAY)
-}
-
-function ensureVisibleOnScreen(state: WindowState): WindowState {
-  const { x, y } = state
-  if (x === undefined || y === undefined) return state
-  const visible = screen.getAllDisplays().some((d) => {
-    const b = d.bounds
-    return x >= b.x && y >= b.y && x < b.x + b.width && y < b.y + b.height
-  })
-  if (visible) return state
-  // 屏外：丢坐标居中，留尺寸/最大化。
-  return { width: state.width, height: state.height, isMaximized: state.isMaximized }
-}
 
 export let mainWindow: BrowserWindow | null = null
 let quitTimeout: NodeJS.Timeout | null = null
@@ -131,6 +17,7 @@ let initialRendererReady = false
 const MAIN_WINDOW_CRASH_WINDOW = 60 * 1000
 const MAIN_WINDOW_MAX_CRASH_RECOVERIES = 3
 let mainWindowCrashTimestamps: number[] = []
+
 type AutoQuitWithoutCoreMode = NonNullable<IAppConfig['autoQuitWithoutCoreMode']>
 
 export async function createWindow(): Promise<void> {
@@ -178,18 +65,20 @@ async function createWindowInternal(): Promise<void> {
     autoQuitWithoutCoreDelay = 60,
     autoQuitWithoutCoreMode = 'core'
   } = await getAppConfig()
-
-  windowState = ensureVisibleOnScreen(loadWindowState())
-  const savedState = windowState
+  const mainWindowState = windowStateKeeper({
+    defaultWidth: 800,
+    defaultHeight: 600,
+    file: 'window-state.json'
+  })
 
   Menu.setApplicationMenu(null)
   mainWindow = new BrowserWindow({
     minWidth: 800,
     minHeight: 600,
-    width: savedState.width,
-    height: savedState.height,
-    x: savedState.x,
-    y: savedState.y,
+    width: mainWindowState.width,
+    height: mainWindowState.height,
+    x: mainWindowState.x,
+    y: mainWindowState.y,
     show: false,
     frame: useWindowFrame,
     fullscreenable: false,
@@ -210,10 +99,7 @@ async function createWindowInternal(): Promise<void> {
     }
   })
 
-  if (savedState.isMaximized && !silentStart) {
-    mainWindow.maximize()
-  }
-
+  mainWindowState.manage(mainWindow)
   setupWindowEvents(mainWindow, {
     silentStart,
     autoQuitWithoutCore,
@@ -306,8 +192,6 @@ function setupWindowEvents(window: BrowserWindow, config: WindowConfig): void {
   })
 
   window.on('close', async (event) => {
-    saveWindowState(window) // 关窗前兜底（#1954）
-
     event.preventDefault()
     window.hide()
 
@@ -328,17 +212,48 @@ function setupWindowEvents(window: BrowserWindow, config: WindowConfig): void {
   })
 
   window.on('closed', () => {
-    clearSaveStateTimer()
     if (mainWindow === window) {
       mainWindow = null
     }
   })
 
-  // resize/move（非 resized/moved，Wayland 常不触发）+ 防抖（#1954）
-  window.on('resize', () => scheduleSaveWindowState(window))
-  window.on('move', () => scheduleSaveWindowState(window))
-  window.on('maximize', () => scheduleSaveWindowState(window, false))
-  window.on('unmaximize', () => scheduleSaveWindowState(window, false))
+  if (process.platform === 'linux') {
+    let restoreTimeout: NodeJS.Timeout | null = null
+    const clearRestoreTimeout = () => {
+      if (restoreTimeout) {
+        clearTimeout(restoreTimeout)
+        restoreTimeout = null
+      }
+    }
+
+    window.on('minimize', () => {
+      window.setMinimumSize(0, 0)
+    })
+
+    window.on('restore', () => {
+      clearRestoreTimeout()
+      restoreTimeout = setTimeout(() => {
+        window.setMinimumSize(800, 600)
+      }, 100)
+    })
+
+    window.on('maximize', () => {
+      window.setMinimumSize(0, 0)
+    })
+
+    window.on('unmaximize', () => {
+      clearRestoreTimeout()
+      restoreTimeout = setTimeout(() => {
+        window.setMinimumSize(800, 600)
+
+        // 可选：作为兜底，如果恢复后发现尺寸依旧异常，强行拉回正常尺寸
+        const bounds = window.getBounds()
+        if (bounds.width < 800 || bounds.height < 600) {
+          window.setSize(Math.max(bounds.width, 800), Math.max(bounds.height, 600))
+        }
+      }, 100)
+    })
+  }
 
   window.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
@@ -396,7 +311,6 @@ export function showMainWindow(): void {
   clearQuitTimeout()
 
   if (mainWindow && !mainWindow.isDestroyed()) {
-    clearQuitTimeout()
     // 兜底：renderer 已崩溃但 render-process-gone 尚未触发时，先 reload 再显示，避免白屏
     if (mainWindow.webContents.isCrashed()) {
       mainWindow.webContents.reload()
