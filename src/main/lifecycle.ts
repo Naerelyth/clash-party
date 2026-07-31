@@ -7,7 +7,6 @@ import { stopCoreForExit, cleanupCoreWatcher } from './core/manager'
 import { primeAdminPrivilegesCache } from './core/admin'
 import { triggerSysProxy, disableSysProxySync } from './sys/sysproxy'
 import { exePath } from './utils/dirs'
-import { saveMainWindowState } from './window'
 
 export function customRelaunch(): void {
   const script = `while kill -0 ${process.pid} 2>/dev/null; do
@@ -100,8 +99,6 @@ export function setupAppLifecycle(): void {
     if (cleanupPromise) return cleanupPromise
 
     cleanupPromise = (async () => {
-      saveMainWindowState() // 硬退出补一次落盘
-
       cleanupCoreWatcher()
 
       if (process.platform !== 'darwin') {
