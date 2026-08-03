@@ -153,6 +153,7 @@ interface IpcApi {
   showContextMenu: () => Promise<void>
   setAlwaysOnTop: (alwaysOnTop: boolean) => Promise<void>
   isAlwaysOnTop: () => Promise<boolean>
+  isNativeWayland: () => Promise<boolean>
   openDevTools: () => Promise<void>
   createHeapSnapshot: () => Promise<void>
   // Shortcut
@@ -319,6 +320,7 @@ export const {
   showContextMenu,
   setAlwaysOnTop,
   isAlwaysOnTop,
+  isNativeWayland,
   openDevTools,
   createHeapSnapshot,
   // Shortcut

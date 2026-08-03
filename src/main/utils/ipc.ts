@@ -390,6 +390,14 @@ const syncHandlers: Record<string, SyncFn> = {
   triggerMainWindow,
   setAlwaysOnTop: (alwaysOnTop: boolean) => mainWindow?.setAlwaysOnTop(alwaysOnTop),
   isAlwaysOnTop: () => mainWindow?.isAlwaysOnTop(),
+  isNativeWayland: () => {
+    const ozonePlatform = app.commandLine.getSwitchValue('ozone-platform').toLowerCase()
+    return (
+      process.platform === 'linux' &&
+      (ozonePlatform === 'wayland' ||
+        (ozonePlatform !== 'x11' && process.env.XDG_SESSION_TYPE === 'wayland'))
+    )
+  },
   openDevTools: () => mainWindow?.webContents.openDevTools(),
   createHeapSnapshot: () => v8.writeHeapSnapshot(path.join(logDir(), `${Date.now()}.heapsnapshot`)),
   relaunchApp: () => {

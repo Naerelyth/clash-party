@@ -140,6 +140,7 @@ const validInvokeChannels = [
   'setTitleBarOverlay',
   'setAlwaysOnTop',
   'isAlwaysOnTop',
+  'isNativeWayland',
   'openDevTools',
   'createHeapSnapshot',
   'relaunchApp',
