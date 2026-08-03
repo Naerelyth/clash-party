@@ -1,6 +1,6 @@
 {
   "name": "mihomo-party",
-  "version": "2.0.0-Naerelyth",
+  "version": "2.1.0-Naerelyth",
   "description": "Mihomo Party",
   "type": "module",
   "main": "./out/main/index.js",
