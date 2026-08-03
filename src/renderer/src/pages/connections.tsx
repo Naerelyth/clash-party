@@ -44,19 +44,27 @@ import { useControledMihomoConfig } from '@renderer/hooks/use-controled-mihomo-c
 
 let cachedConnections: IMihomoConnectionDetail[] = []
 const MAX_QUEUE_SIZE = 100
-// 按进程路径累积的内存缓存封顶，避免长时间运行无界增长
+// Windows/macOS keep their existing path-based cache limits. Linux entries are
+// pruned against the retained connection list when each snapshot arrives.
 const MAX_ICON_CACHE_SIZE = 256
 const MAX_APP_NAME_CACHE_SIZE = 512
+const MAX_LINUX_APP_ICON_CACHE_SIZE = 128
+const RESOLUTION_RETRY_DELAY_MS = 2000
 const CONNECTIONS_FILTER_KEY = 'connections-filter'
 
-function putCappedRecord<T>(
+function getAppCacheKey(connection: IMihomoConnectionDetail): string {
+  return platform === 'linux' ? connection.id : connection.metadata.processPath || ''
+}
+
+function putCacheRecord<T>(
   prev: Record<string, T>,
   key: string,
   value: T,
-  max: number
+  max?: number
 ): Record<string, T> {
-  if (max <= 0) return {}
   const next: Record<string, T> = { ...prev, [key]: value }
+  if (max === undefined) return next
+  if (max <= 0) return {}
   const keys = Object.keys(next)
   const overflow = keys.length - max
   for (let i = 0, removed = 0; removed < overflow && i < keys.length; i++) {
@@ -66,6 +74,31 @@ function putCappedRecord<T>(
     }
   }
   return next
+}
+
+function setCappedMap<K, V>(map: Map<K, V>, key: K, value: V, max: number): void {
+  if (!map.has(key) && map.size >= max) {
+    map.delete(map.keys().next().value as K)
+  }
+  map.set(key, value)
+}
+
+function retainRecord<T>(record: Record<string, T>, keys: Set<string>): Record<string, T> {
+  const staleKeys = Object.keys(record).filter((key) => !keys.has(key))
+  if (staleKeys.length === 0) return record
+  const next = { ...record }
+  staleKeys.forEach((key) => delete next[key])
+  return next
+}
+
+function retainMapKeys<T>(map: Map<string, T>, keys: Set<string>): void {
+  for (const key of map.keys()) {
+    if (!keys.has(key)) map.delete(key)
+  }
+}
+
+function deferResolutionRetry(map: Map<string, number>, key: string): void {
+  map.set(key, Date.now() + RESOLUTION_RETRY_DELAY_MS)
 }
 
 const Connections: React.FC = () => {
@@ -104,14 +137,18 @@ const Connections: React.FC = () => {
   const activeConnectionsRef = useRef(activeConnections)
   const allConnectionsRef = useRef(allConnections)
 
-  const iconRequestQueue = useRef(new Set<string>())
+  const iconRequestQueue = useRef(new Map<string, IMihomoConnectionDetail['metadata']>())
   const processingIcons = useRef(new Set<string>())
+  const iconRetryAfter = useRef(new Map<string, number>())
+  const processedLinuxIcons = useRef(new Map<string, Promise<string>>())
   const processIconTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const processIconIdleCallback = useRef<number | null>(null)
 
-  const appNameRequestQueue = useRef(new Set<string>())
+  const appNameRequestQueue = useRef(new Map<string, IMihomoConnectionDetail['metadata']>())
   const processingAppNames = useRef(new Set<string>())
+  const appNameRetryAfter = useRef(new Map<string, number>())
   const processAppNameTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const processOtherPathsTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     activeConnectionsRef.current = activeConnections
     allConnectionsRef.current = allConnections
@@ -239,24 +276,39 @@ const Connections: React.FC = () => {
   }
 
   const processAppNameQueue = useCallback(async () => {
-    if (processingAppNames.current.size >= 3 || appNameRequestQueue.current.size === 0) return
+    const limit = 3
+    if (processingAppNames.current.size >= limit || appNameRequestQueue.current.size === 0) return
+    const batchSize = platform === 'linux' ? limit - processingAppNames.current.size : limit
 
-    const pathsToProcess = Array.from(appNameRequestQueue.current).slice(0, 3)
-    pathsToProcess.forEach((path) => appNameRequestQueue.current.delete(path))
+    const keysToProcess = Array.from(appNameRequestQueue.current.entries()).slice(0, batchSize)
+    keysToProcess.forEach(([key]) => appNameRequestQueue.current.delete(key))
 
-    const promises = pathsToProcess.map(async (path) => {
-      if (processingAppNames.current.has(path)) return
-      processingAppNames.current.add(path)
+    const promises = keysToProcess.map(async ([key, metadata]) => {
+      if (processingAppNames.current.has(key)) return
+      processingAppNames.current.add(key)
 
       try {
-        const appName = await getAppName(path)
+        const appName =
+          platform === 'linux'
+            ? await getAppName(metadata.processPath, metadata.process, metadata)
+            : await getAppName(metadata.processPath)
         if (appName) {
-          setAppNameCache((prev) => putCappedRecord(prev, path, appName, MAX_APP_NAME_CACHE_SIZE))
+          appNameRetryAfter.current.delete(key)
+          setAppNameCache((prev) =>
+            putCacheRecord(
+              prev,
+              key,
+              appName,
+              platform === 'linux' ? undefined : MAX_APP_NAME_CACHE_SIZE
+            )
+          )
+        } else if (platform === 'linux') {
+          deferResolutionRetry(appNameRetryAfter.current, key)
         }
       } catch {
-        // ignore
+        if (platform === 'linux') deferResolutionRetry(appNameRetryAfter.current, key)
       } finally {
-        processingAppNames.current.delete(path)
+        processingAppNames.current.delete(key)
       }
     })
 
@@ -268,40 +320,75 @@ const Connections: React.FC = () => {
   }, [])
 
   const processIconQueue = useCallback(async () => {
-    if (processingIcons.current.size >= 5 || iconRequestQueue.current.size === 0) return
+    const limit = 5
+    if (processingIcons.current.size >= limit || iconRequestQueue.current.size === 0) return
+    const batchSize = platform === 'linux' ? limit - processingIcons.current.size : limit
 
-    const pathsToProcess = Array.from(iconRequestQueue.current).slice(0, 5)
-    pathsToProcess.forEach((path) => iconRequestQueue.current.delete(path))
+    const keysToProcess = Array.from(iconRequestQueue.current.entries()).slice(0, batchSize)
+    keysToProcess.forEach(([key]) => iconRequestQueue.current.delete(key))
 
-    const promises = pathsToProcess.map(async (path) => {
-      if (processingIcons.current.has(path)) return
-      processingIcons.current.add(path)
+    const promises = keysToProcess.map(async ([key, metadata]) => {
+      if (processingIcons.current.has(key)) return
+      processingIcons.current.add(key)
 
       try {
-        const rawBase64 = await getIconDataURL(path)
-        if (!rawBase64) return
+        const rawBase64 =
+          platform === 'linux'
+            ? await getIconDataURL(metadata.processPath, metadata.process, metadata)
+            : await getIconDataURL(metadata.processPath)
+        if (!rawBase64) {
+          if (platform === 'linux') {
+            deferResolutionRetry(iconRetryAfter.current, key)
+          }
+          return
+        }
+        iconRetryAfter.current.delete(key)
 
         const fullDataURL = rawBase64.startsWith('data:')
           ? rawBase64
           : `data:image/png;base64,${rawBase64}`
 
-        let processedDataURL = fullDataURL
-        if (platform !== 'darwin') {
+        let processedDataURL: string
+        if (platform === 'linux') {
+          let processed = processedLinuxIcons.current.get(fullDataURL)
+          if (!processed) {
+            processed = cropAndPadTransparent(fullDataURL).catch((error) => {
+              processedLinuxIcons.current.delete(fullDataURL)
+              throw error
+            })
+            setCappedMap(
+              processedLinuxIcons.current,
+              fullDataURL,
+              processed,
+              MAX_LINUX_APP_ICON_CACHE_SIZE
+            )
+          }
+          processedDataURL = await processed
+        } else if (platform !== 'darwin') {
           processedDataURL = await cropAndPadTransparent(fullDataURL)
+        } else {
+          processedDataURL = fullDataURL
         }
 
-        saveIconToCache(path, processedDataURL)
+        if (platform !== 'linux') saveIconToCache(metadata.processPath, processedDataURL)
 
-        setIconMap((prev) => putCappedRecord(prev, path, processedDataURL, MAX_ICON_CACHE_SIZE))
+        setIconMap((prev) =>
+          putCacheRecord(
+            prev,
+            key,
+            processedDataURL,
+            platform === 'linux' ? undefined : MAX_ICON_CACHE_SIZE
+          )
+        )
 
         const firstConnection = filteredConnectionsRef.current[0]
-        if (firstConnection?.metadata.processPath === path) {
+        if (firstConnection && getAppCacheKey(firstConnection) === key) {
           setFirstItemRefreshTrigger((prev) => prev + 1)
         }
       } catch {
-        // ignore
+        if (platform === 'linux') deferResolutionRetry(iconRetryAfter.current, key)
       } finally {
-        processingIcons.current.delete(path)
+        processingIcons.current.delete(key)
       }
     })
 
@@ -319,22 +406,28 @@ const Connections: React.FC = () => {
   }, [])
 
   useEffect(() => {
-    if (!displayIcon || findProcessMode === 'off') return
+    if (
+      findProcessMode === 'off' ||
+      (platform === 'linux' ? !displayIcon && !displayAppName : !displayIcon)
+    ) {
+      return
+    }
 
-    const visiblePaths = new Set<string>()
-    const otherPaths = new Set<string>()
+    if (processOtherPathsTimer.current) clearTimeout(processOtherPathsTimer.current)
+
+    const visibleKeys = new Set<string>()
+    const otherKeys = new Set<string>()
 
     const visibleConnections = filteredConnectionsRef.current.slice(0, 20)
     visibleConnections.forEach((c) => {
-      const path = c.metadata.processPath || ''
-      visiblePaths.add(path)
+      visibleKeys.add(getAppCacheKey(c))
     })
 
     const collectPaths = (connections: IMihomoConnectionDetail[]) => {
       for (const c of connections) {
-        const path = c.metadata.processPath || ''
-        if (!visiblePaths.has(path)) {
-          otherPaths.add(path)
+        const key = getAppCacheKey(c)
+        if (!visibleKeys.has(key)) {
+          otherKeys.add(key)
         }
       }
     }
@@ -342,50 +435,66 @@ const Connections: React.FC = () => {
     collectPaths(activeConnections)
     collectPaths(closedConnections)
 
-    const loadIcon = (path: string, isVisible: boolean = false): void => {
-      if (iconMap[path] || processingIcons.current.has(path)) return
+    const loadIcon = (connection: IMihomoConnectionDetail, isVisible: boolean = false): void => {
+      const key = getAppCacheKey(connection)
+      if (iconMap[key] || processingIcons.current.has(key)) return
+      if ((iconRetryAfter.current.get(key) || 0) > Date.now()) return
 
       if (iconRequestQueue.current.size >= MAX_QUEUE_SIZE) return
 
-      const fromCache = getIconFromCache(path)
+      const fromCache =
+        platform === 'linux' ? null : getIconFromCache(connection.metadata.processPath)
       if (fromCache) {
-        setIconMap((prev) => putCappedRecord(prev, path, fromCache, MAX_ICON_CACHE_SIZE))
-        if (isVisible && filteredConnections[0]?.metadata.processPath === path) {
+        setIconMap((prev) => putCacheRecord(prev, key, fromCache, MAX_ICON_CACHE_SIZE))
+        if (isVisible && filteredConnections[0] && getAppCacheKey(filteredConnections[0]) === key) {
           setFirstItemRefreshTrigger((prev) => prev + 1)
         }
         return
       }
 
-      iconRequestQueue.current.add(path)
+      iconRequestQueue.current.set(key, connection.metadata)
     }
 
-    const loadAppName = (path: string): void => {
-      if (appNameCache[path] || processingAppNames.current.has(path)) return
+    const loadAppName = (connection: IMihomoConnectionDetail): void => {
+      const key = getAppCacheKey(connection)
+      if (key in appNameCache || processingAppNames.current.has(key)) return
+      if ((appNameRetryAfter.current.get(key) || 0) > Date.now()) return
       if (appNameRequestQueue.current.size >= MAX_QUEUE_SIZE) return
-      appNameRequestQueue.current.add(path)
+      appNameRequestQueue.current.set(key, connection.metadata)
     }
 
-    visiblePaths.forEach((path) => {
-      loadIcon(path, true)
-      if (displayAppName) loadAppName(path)
+    visibleConnections.forEach((connection) => {
+      if (displayIcon) loadIcon(connection, true)
+      if (displayAppName) loadAppName(connection)
     })
 
-    if (otherPaths.size > 0) {
+    if (otherKeys.size > 0) {
       const loadOtherPaths = () => {
-        otherPaths.forEach((path) => {
-          loadIcon(path, false)
-          if (displayAppName) loadAppName(path)
-        })
+        for (const connection of [...activeConnections, ...closedConnections]) {
+          const key = getAppCacheKey(connection)
+          if (visibleKeys.has(key)) continue
+          if (displayIcon) loadIcon(connection, false)
+          if (displayAppName) loadAppName(connection)
+        }
+
+        if (displayIcon && iconRequestQueue.current.size > 0) {
+          processIconTimer.current = setTimeout(processIconQueue, 10)
+        }
+        if (displayAppName && appNameRequestQueue.current.size > 0) {
+          processAppNameTimer.current = setTimeout(processAppNameQueue, 10)
+        }
       }
 
-      setTimeout(loadOtherPaths, 100)
+      processOtherPathsTimer.current = setTimeout(loadOtherPaths, 100)
     }
 
     if (processIconTimer.current) clearTimeout(processIconTimer.current)
     if (processIconIdleCallback.current) cancelIdleCallback(processIconIdleCallback.current)
     if (processAppNameTimer.current) clearTimeout(processAppNameTimer.current)
 
-    processIconTimer.current = setTimeout(processIconQueue, 10)
+    if (displayIcon) {
+      processIconTimer.current = setTimeout(processIconQueue, 10)
+    }
     if (displayAppName) {
       processAppNameTimer.current = setTimeout(processAppNameQueue, 10)
     }
@@ -394,6 +503,7 @@ const Connections: React.FC = () => {
       if (processIconTimer.current) clearTimeout(processIconTimer.current)
       if (processIconIdleCallback.current) cancelIdleCallback(processIconIdleCallback.current)
       if (processAppNameTimer.current) clearTimeout(processAppNameTimer.current)
+      if (processOtherPathsTimer.current) clearTimeout(processOtherPathsTimer.current)
     }
   }, [
     activeConnections,
@@ -441,6 +551,15 @@ const Connections: React.FC = () => {
         }))
 
       const sliced = allConns.slice(-(activeConns.length + 200))
+      if (platform === 'linux') {
+        const liveKeys = new Set(
+          [...activeConns, ...closedConns].map((connection) => connection.id)
+        )
+        setIconMap((prev) => retainRecord(prev, liveKeys))
+        setAppNameCache((prev) => retainRecord(prev, liveKeys))
+        retainMapKeys(iconRetryAfter.current, liveKeys)
+        retainMapKeys(appNameRetryAfter.current, liveKeys)
+      }
       setActiveConnections(activeConns)
       setClosedConnections(closedConns)
       setAllConnections(sliced)
@@ -466,13 +585,10 @@ const Connections: React.FC = () => {
 
   const renderConnectionItem = useCallback(
     (i: number, connection: IMihomoConnectionDetail) => {
-      const path = connection.metadata.processPath || ''
-      const iconUrl = (displayIcon && findProcessMode !== 'off' && iconMap[path]) || ''
+      const cacheKey = getAppCacheKey(connection)
+      const iconUrl = (displayIcon && findProcessMode !== 'off' && iconMap[cacheKey]) || ''
       const itemKey = i === 0 ? `${connection.id}-${firstItemRefreshTrigger}` : connection.id
-      const displayName =
-        displayAppName && connection.metadata.processPath
-          ? appNameCache[connection.metadata.processPath]
-          : undefined
+      const displayName = displayAppName ? appNameCache[cacheKey] : undefined
 
       return (
         <ConnectionItem

@@ -2,9 +2,20 @@ import fs from 'fs'
 import path from 'path'
 import { spawnSync } from 'child_process'
 import plist from 'plist'
-import { findBestAppPath, isIOSApp } from './icon'
+import {
+  findBestAppPath,
+  findDesktopFile,
+  findDesktopFileForConnection,
+  getDesktopEntryNameFromFile,
+  isIOSApp
+} from './icon'
+import type { LinuxConnectionMetadata } from './linux-process'
 
-export async function getAppName(appPath: string): Promise<string> {
+export async function getAppName(
+  appPath: string,
+  processName?: string,
+  metadata?: LinuxConnectionMetadata
+): Promise<string> {
   if (process.platform === 'darwin') {
     try {
       const targetPath = findBestAppPath(appPath)
@@ -37,6 +48,20 @@ export async function getAppName(appPath: string): Promise<string> {
       // ignore
     }
   }
+
+  if (process.platform === 'linux') {
+    try {
+      const desktopFile = metadata
+        ? await findDesktopFileForConnection(metadata, processName)
+        : await findDesktopFile(appPath, processName)
+      if (!desktopFile) return ''
+
+      return (await getDesktopEntryNameFromFile(desktopFile)) || ''
+    } catch {
+      // ignore
+    }
+  }
+
   return ''
 }
 
