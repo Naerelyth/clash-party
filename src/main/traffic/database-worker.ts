@@ -230,11 +230,13 @@ function queryOverview(
       end,
       payload.bucketSizeMs
     ) as Record<string, unknown>[]
-  ).map((row): TrafficUsageTrendPoint => ({
-    timestamp: Number(row.timestamp),
-    upload: Number(row.upload ?? 0),
-    download: Number(row.download ?? 0)
-  }))
+  ).map(
+    (row): TrafficUsageTrendPoint => ({
+      timestamp: Number(row.timestamp),
+      upload: Number(row.upload ?? 0),
+      download: Number(row.download ?? 0)
+    })
+  )
   const upload = Number(totalsRow.upload ?? 0)
   const download = Number(totalsRow.download ?? 0)
   return {

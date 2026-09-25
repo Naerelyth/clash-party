@@ -109,7 +109,8 @@ export interface OperationMeta {
 }
 
 export type OperationResult<T> =
-  ({ ok: true; value: T } & OperationMeta) | ({ ok: false; error: unknown } & OperationMeta)
+  | ({ ok: true; value: T } & OperationMeta)
+  | ({ ok: false; error: unknown } & OperationMeta)
 
 export class PluginNotFoundError extends Error {
   constructor() {
