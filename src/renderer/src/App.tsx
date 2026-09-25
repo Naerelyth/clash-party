@@ -129,7 +129,7 @@ const FirstContentReady: React.FC = () => {
 }
 
 const App: React.FC = () => {
-  const { t } = useTranslation()
+  const { t, ready } = useTranslation()
   const { appConfig, patchAppConfig } = useAppConfig()
   const hasAppConfig = Boolean(appConfig)
   const {
@@ -148,7 +148,6 @@ const App: React.FC = () => {
   const siderWidthValueRef = useRef(siderWidthValue)
   const [resizing, setResizing] = useState(false)
   const resizingRef = useRef(resizing)
-  const tourInitialized = useRef(false)
   useDeferredRoutePreload()
   const { setTheme, systemTheme } = useTheme()
   const navigate: NavigateFunction = useNavigate()
@@ -208,12 +207,10 @@ const App: React.FC = () => {
   }, [patchAppConfig])
 
   useEffect(() => {
-    if (!tourInitialized.current) {
-      tourInitialized.current = true
-      createTourDriver(t, navigate)
-      startTourIfNeeded()
-    }
-  }, [t, navigate])
+    if (!ready || !hasAppConfig || !appConfig?.modeSelected) return
+    createTourDriver(t, navigate)
+    startTourIfNeeded()
+  }, [t, ready, navigate, hasAppConfig, appConfig?.modeSelected])
 
   useEffect(() => {
     setNativeTheme(appTheme)

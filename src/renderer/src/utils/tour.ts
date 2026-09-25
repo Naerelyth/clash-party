@@ -1,4 +1,4 @@
-import { driver } from 'driver.js'
+import { driver, type Config } from 'driver.js'
 import { TFunction } from 'i18next'
 import { NavigateFunction } from 'react-router-dom'
 
@@ -9,7 +9,7 @@ export function getDriver(): ReturnType<typeof driver> | null {
 }
 
 export function createTourDriver(t: TFunction, navigate: NavigateFunction): void {
-  driverInstance = driver({
+  const config: Config = {
     showProgress: true,
     nextBtnText: t('common.next'),
     prevBtnText: t('common.prev'),
@@ -183,7 +183,16 @@ export function createTourDriver(t: TFunction, navigate: NavigateFunction): void
         }
       }
     ]
-  })
+  }
+  if (driverInstance) {
+    // Tour text is resolved eagerly; refresh it when the app language changes.
+    driverInstance.setConfig(config)
+    if (driverInstance.isActive()) {
+      driverInstance.drive(driverInstance.getActiveIndex() ?? 0)
+    }
+  } else {
+    driverInstance = driver(config)
+  }
 }
 
 export function startTourIfNeeded(): void {
