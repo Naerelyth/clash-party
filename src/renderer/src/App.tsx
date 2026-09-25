@@ -2,16 +2,8 @@ import { useTheme } from 'next-themes'
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { NavigateFunction, useLocation, useNavigate, useRoutes } from 'react-router-dom'
 import OutboundModeSwitcher from '@renderer/components/sider/outbound-mode-switcher'
-import {
-  Button,
-  Divider,
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalFooter,
-  ModalHeader
-} from '@heroui/react'
-import { IoSettings } from 'react-icons/io5'
+import { Button, Divider, Modal, ModalBody, ModalContent, ModalHeader } from '@heroui/react'
+import { IoArrowForward, IoSettings } from 'react-icons/io5'
 import { toast } from '@renderer/components/base/toast'
 import routes, { useDeferredRoutePreload } from '@renderer/routes'
 import UpdaterButton from '@renderer/components/updater/updater-button'
@@ -43,45 +35,83 @@ const SiderCards = lazy(() => siderCardsPromise)
 
 const ModeSelection: React.FC<{ onSelect: (mode: 'standard' | 'simple') => Promise<void> }> = ({
   onSelect
-}) => (
-  <Modal isOpen hideCloseButton isDismissable={false}>
-    <ModalContent>
-      {(close) => (
-        <>
-          <ModalHeader>选择配置模式</ModalHeader>
-          <ModalBody>
-            <p className="text-small text-default-500">
-              首次启动请选择配置方式。之后可在页面中切换，两个模式的数据互相独立。
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              <Button
-                variant="flat"
-                onPress={() => {
-                  void onSelect('standard')
-                    .then(close)
-                    .catch((error) => toast.error(String(error)))
-                }}
-              >
-                标准模式<div className="text-tiny">配置 → 覆写 → 客户端覆写</div>
-              </Button>
-              <Button
-                color="primary"
-                onPress={() => {
-                  void onSelect('simple')
-                    .then(close)
-                    .catch((error) => toast.error(String(error)))
-                }}
-              >
-                简易模式<div className="text-tiny">模块化编辑并合并最终配置</div>
-              </Button>
-            </div>
-          </ModalBody>
-          <ModalFooter />
-        </>
-      )}
-    </ModalContent>
-  </Modal>
-)
+}) => {
+  const { t, i18n } = useTranslation()
+  const [selectingMode, setSelectingMode] = useState<'standard' | 'simple' | null>(null)
+  const selecting = useRef(false)
+  return (
+    <Modal
+      isOpen
+      hideCloseButton
+      isDismissable={false}
+      isKeyboardDismissDisabled
+      size="lg"
+      scrollBehavior="inside"
+    >
+      <ModalContent dir={i18n.dir()}>
+        {(close) => (
+          <>
+            <ModalHeader className="px-6 pt-6 pb-2 text-xl leading-snug wrap-break-word">
+              {t('settings.operationMode.select.title')}
+            </ModalHeader>
+            <ModalBody className="gap-5 px-6 pt-0 pb-6">
+              <p className="text-small leading-relaxed text-default-500">
+                {t('settings.operationMode.select.description')}
+              </p>
+              <div className="flex shrink-0 flex-col gap-3" aria-busy={selectingMode !== null}>
+                {(['standard', 'simple'] as const).map((mode) => (
+                  <Button
+                    key={mode}
+                    variant="flat"
+                    color={mode === 'simple' ? 'primary' : 'default'}
+                    className="h-auto min-h-24 w-full min-w-0 shrink-0 justify-start gap-4 border border-default-200 px-4 py-4 whitespace-normal"
+                    aria-labelledby={`operation-mode-${mode}-label`}
+                    aria-describedby={`operation-mode-${mode}-description`}
+                    isDisabled={selectingMode !== null}
+                    isLoading={selectingMode === mode}
+                    onPress={async () => {
+                      if (selecting.current) return
+                      selecting.current = true
+                      setSelectingMode(mode)
+                      try {
+                        await onSelect(mode)
+                        close()
+                      } catch (error) {
+                        toast.error(String(error), t('settings.operationMode.error'))
+                      } finally {
+                        selecting.current = false
+                        setSelectingMode(null)
+                      }
+                    }}
+                  >
+                    <span className="flex min-w-0 flex-1 flex-col gap-1.5 text-start wrap-break-word">
+                      <span id={`operation-mode-${mode}-label`} className="text-base font-semibold">
+                        {t(`settings.operationMode.${mode}.label`)}
+                      </span>
+                      <span
+                        id={`operation-mode-${mode}-description`}
+                        className="text-small leading-relaxed text-foreground-500"
+                      >
+                        {t(`settings.operationMode.${mode}.description`)}
+                      </span>
+                    </span>
+                    <IoArrowForward
+                      aria-hidden="true"
+                      className="shrink-0 text-lg rtl:rotate-180"
+                    />
+                  </Button>
+                ))}
+              </div>
+              <p className="border-t border-default-200 pt-4 text-small leading-relaxed text-pretty text-default-500 wrap-break-word">
+                {t('settings.operationMode.select.note')}
+              </p>
+            </ModalBody>
+          </>
+        )}
+      </ModalContent>
+    </Modal>
+  )
+}
 
 const FirstContentReady: React.FC = () => {
   const { appConfig } = useAppConfig()
