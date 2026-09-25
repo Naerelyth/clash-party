@@ -3,7 +3,7 @@ import { useControledMihomoConfig } from '@renderer/hooks/use-controled-mihomo-c
 import BorderSwitch from '@renderer/components/base/border-switch'
 import { TbDeviceIpadHorizontalBolt } from 'react-icons/tb'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { updateTrayIconImmediate } from '@renderer/utils/ipc'
+import { updateTrayIcon, updateTrayIconImmediate } from '@renderer/utils/ipc'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import React from 'react'
@@ -89,7 +89,9 @@ const TunSwitcher: React.FC<Props> = (props) => {
         console.warn('Permission check failed:', error)
       }
 
-      await patchControledMihomoConfig({ tun: { enable }, dns: { enable: true } })
+      await patchControledMihomoConfig({ tun: { enable }, dns: { enable: true } }).finally(
+        updateTrayIcon
+      )
       if (enable) {
         const autoRunEnabled = await window.electron.ipcRenderer.invoke('checkAutoRun')
         if (autoRunEnabled) {
@@ -97,7 +99,7 @@ const TunSwitcher: React.FC<Props> = (props) => {
         }
       }
     } else {
-      await patchControledMihomoConfig({ tun: { enable } })
+      await patchControledMihomoConfig({ tun: { enable } }).finally(updateTrayIcon)
     }
     window.electron.ipcRenderer.send('updateFloatingWindow')
     window.electron.ipcRenderer.send('updateTrayMenu')
