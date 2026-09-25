@@ -74,6 +74,11 @@ export async function setOperationMode(mode: OperationMode): Promise<void> {
         logger.error('Failed to roll back operation mode switch', rollbackError)
       }
       throw error
+    } finally {
+      // Publish the settled mode, including rollback, to every renderer.
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.webContents.send('appConfigUpdated')
+      }
     }
   })
 }

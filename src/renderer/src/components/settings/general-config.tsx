@@ -271,11 +271,11 @@ const GeneralConfig: React.FC = () => {
         />
       )}
       <SettingCard>
-        <SettingItem title="配置模式" divider>
+        <SettingItem title={t('settings.operationMode.title')} divider>
           <Select
             className="w-37.5"
             size="sm"
-            aria-label="配置模式"
+            aria-label={t('settings.operationMode.title')}
             isLoading={switchingMode}
             isDisabled={switchingMode}
             disallowEmptySelection
@@ -286,15 +286,16 @@ const GeneralConfig: React.FC = () => {
               setSwitchingMode(true)
               try {
                 await setOperationMode(next)
+                toast.success(t(`settings.operationMode.${next}.success`))
               } catch (error) {
-                toast.error(String(error))
+                toast.error(String(error), t('settings.operationMode.error'))
               } finally {
                 setSwitchingMode(false)
               }
             }}
           >
-            <SelectItem key="standard">标准模式</SelectItem>
-            <SelectItem key="simple">简易模式</SelectItem>
+            <SelectItem key="standard">{t('settings.operationMode.standard.label')}</SelectItem>
+            <SelectItem key="simple">{t('settings.operationMode.simple.label')}</SelectItem>
           </Select>
         </SettingItem>
         <SettingItem title={t('settings.language')} divider>
