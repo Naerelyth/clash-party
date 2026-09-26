@@ -1,6 +1,5 @@
 import fs from 'fs'
-import os from 'os'
-import path from 'path'
+import { posix as path } from 'path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 const { execFile, getFileIcon, settings } = vi.hoisted(() => ({
@@ -8,6 +7,11 @@ const { execFile, getFileIcon, settings } = vi.hoisted(() => ({
   getFileIcon: vi.fn(),
   settings: { packaged: false, root: '', platform: 'darwin' }
 }))
+// The simulated macOS host must use POSIX paths even when Vitest runs on Windows.
+vi.mock('path', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('path')>()
+  return { ...actual, default: actual.posix }
+})
 vi.mock('child_process', () => ({ execFile }))
 vi.mock('electron', () => ({
   app: {
@@ -21,6 +25,17 @@ vi.mock('electron', () => ({
 }))
 let root: string
 let executable: string
+const files = new Map<string, string>()
+const directories = new Set<string>()
+function mkdir(directory: string): void {
+  directories.add(directory)
+  const parent = path.dirname(directory)
+  if (parent !== directory) mkdir(parent)
+}
+function write(file: string, content: string): void {
+  mkdir(path.dirname(file))
+  files.set(file, content)
+}
 const platform = Object.getOwnPropertyDescriptor(process, 'platform') as PropertyDescriptor
 const resources = Object.getOwnPropertyDescriptor(process, 'resourcesPath')
 function setPlatform(value: string): void {
@@ -31,14 +46,37 @@ beforeEach(() => {
   execFile.mockReset()
   getFileIcon.mockReset()
   settings.packaged = false
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'app-info-'))
+  root = '/app-info'
+  files.clear()
+  directories.clear()
+  vi.spyOn(fs.promises, 'stat').mockImplementation(async (file) => {
+    if (!directories.has(String(file)) && !files.has(String(file))) throw new Error('ENOENT')
+    return {
+      isDirectory: () => directories.has(String(file)),
+      isFile: () => files.has(String(file))
+    } as fs.Stats
+  })
+  vi.spyOn(fs.promises, 'access').mockImplementation(async (file) => {
+    if (!directories.has(String(file)) && !files.has(String(file))) throw new Error('ENOENT')
+  })
+  vi.spyOn(fs.promises, 'readdir').mockImplementation(async (directory) => {
+    if (!directories.has(String(directory))) throw new Error('ENOENT')
+    return [...directories, ...files.keys()]
+      .filter((file) => file !== String(directory) && path.dirname(file) === String(directory))
+      .map((file) => path.basename(file)) as never
+  })
+  vi.spyOn(fs.promises, 'readFile').mockImplementation(async (file) => {
+    const content = files.get(String(file))
+    if (content === undefined) throw new Error('ENOENT')
+    return content
+  })
   settings.root = root
   setPlatform('darwin')
   Object.defineProperty(process, 'resourcesPath', { configurable: true, value: '/resources' })
   executable = path.join(root, 'Browser.app/Contents/Frameworks/Helper.app/Contents/MacOS/Helper')
-  fs.mkdirSync(path.dirname(executable), { recursive: true })
-  fs.mkdirSync(path.join(root, 'Browser.app/Contents/Resources'), { recursive: true })
-  fs.writeFileSync(path.join(root, 'Browser.app/Contents/Resources/browser.icns'), '')
+  mkdir(path.dirname(executable))
+  mkdir(path.join(root, 'Browser.app/Contents/Resources'))
+  write(path.join(root, 'Browser.app/Contents/Resources/browser.icns'), '')
   execFile.mockImplementation((file, _args, _options, callback) => {
     callback(null, file === '/usr/bin/osascript' ? '浏览器\n' : Buffer.from('icon'))
   })
@@ -49,7 +87,6 @@ afterEach(() => {
   Object.defineProperty(process, 'platform', platform)
   if (resources) Object.defineProperty(process, 'resourcesPath', resources)
   else delete process.resourcesPath
-  fs.rmSync(root, { recursive: true, force: true })
 })
 
 it.each([false, true])(
@@ -82,9 +119,9 @@ it.each([false, true])(
 
 it('keeps inner bundles with their own icons and falls back to Info.plist asynchronously', async () => {
   const helper = path.dirname(path.dirname(path.dirname(executable)))
-  fs.mkdirSync(path.join(helper, 'Contents/Resources'), { recursive: true })
-  fs.writeFileSync(path.join(helper, 'Contents/Resources/helper.icns'), '')
-  fs.writeFileSync(
+  mkdir(path.join(helper, 'Contents/Resources'))
+  write(path.join(helper, 'Contents/Resources/helper.icns'), '')
+  write(
     path.join(helper, 'Contents/Info.plist'),
     '<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleDisplayName</key><string>Helper Name</string></dict></plist>'
   )
@@ -100,8 +137,8 @@ it('keeps inner bundles with their own icons and falls back to Info.plist asynch
 
 it('handles iOS-style root plists and avoids subprocesses for non-app or missing paths', async () => {
   const bundle = path.join(root, 'iOS.app')
-  fs.mkdirSync(bundle)
-  fs.writeFileSync(
+  mkdir(bundle)
+  write(
     path.join(bundle, 'Info.plist'),
     '<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleName</key><string>iOS App</string></dict></plist>'
   )

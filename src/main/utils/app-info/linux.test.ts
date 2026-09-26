@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
@@ -13,6 +12,12 @@ vi.mock('child_process', () => ({
 }))
 
 let root: string
+const procLinks = new Map<string, string>()
+function procLink(target: string, file: string): void {
+  // procfs links contain Linux-specific values, not host filesystem symlink targets.
+  write(file, '')
+  procLinks.set(path.join(root, file), target)
+}
 const platform = Object.getOwnPropertyDescriptor(process, 'platform') as PropertyDescriptor
 function write(file: string, content: string): string {
   const target = path.join(root, file)
@@ -26,10 +31,18 @@ function desktop(id: string, fields: string, location = 'data'): string {
 
 beforeEach(() => {
   vi.resetModules()
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'linux-app-test-'))
+  // Stay on the checkout drive so XDG_DATA_DIRS can be relative on Windows.
+  root = fs.mkdtempSync(path.join(process.cwd(), '.linux-app-test-'))
   Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' })
   vi.stubEnv('XDG_DATA_HOME', path.join(root, 'data'))
-  vi.stubEnv('XDG_DATA_DIRS', path.join(root, 'system'))
+  // XDG uses ':' as its separator, so keep Windows drive letters out of this list.
+  vi.stubEnv('XDG_DATA_DIRS', path.relative(process.cwd(), path.join(root, 'system')))
+  procLinks.clear()
+  const readlink = fs.promises.readlink.bind(fs.promises)
+  vi.spyOn(fs.promises, 'readlink').mockImplementation((file, options) => {
+    const target = procLinks.get(String(file))
+    return target === undefined ? readlink(file, options) : Promise.resolve(target)
+  })
   vi.stubEnv('HOME', root)
   vi.stubEnv('PATH', path.join(root, 'bin'))
   vi.stubEnv('LC_ALL', 'zh_CN.UTF-8')
@@ -147,14 +160,14 @@ it('distinguishes shared helper connections by socket owner and parent cgroup', 
     write(`proc/${pid}/status`, 'Uid:\t1000\t1000\t1000\t1000\n')
     write(`proc/${pid}/cgroup`, '0::/user.slice\n')
     fs.mkdirSync(path.join(procRoot, String(pid), 'fd'))
-    fs.symlinkSync(`socket:[${inode}]`, path.join(procRoot, String(pid), 'fd/8'))
-    fs.symlinkSync('/usr/libexec/WebKitNetworkProcess', path.join(procRoot, String(pid), 'exe'))
+    procLink(`socket:[${inode}]`, `proc/${pid}/fd/8`)
+    procLink('/usr/libexec/WebKitNetworkProcess', `proc/${pid}/exe`)
     write(`proc/${parent}/stat`, `${parent} (app) S 1`)
     write(
       `proc/${parent}/cgroup`,
       `0::/user.slice/app.slice/app-gnome-org.example.${id}-123.scope\n`
     )
-    fs.symlinkSync(`/opt/${id.toLowerCase()}`, path.join(procRoot, String(parent), 'exe'))
+    procLink(`/opt/${id.toLowerCase()}`, `proc/${parent}/exe`)
   }
   const processes = await import('./linux-process')
   const findPid = processes.findConnectionPid
@@ -197,16 +210,10 @@ it('does not enumerate processes for missing sockets and skips unrelated file de
   write('proc/net/tcp', 'header\n0: 0100007F:C350 00000000:0000 01 0 0 0 1000 0 4242\n')
   for (let pid = 100; pid < 151; pid++) {
     write(`proc/${pid}/status`, 'Uid:\t1000\n')
-    fs.symlinkSync(
-      pid === 150 ? '/opt/browser' : '/opt/unrelated',
-      path.join(procRoot, `${pid}/exe`)
-    )
+    procLink(pid === 150 ? '/opt/browser' : '/opt/unrelated', `proc/${pid}/exe`)
     fs.mkdirSync(path.join(procRoot, `${pid}/fd`))
     for (let fd = 0; fd < 20; fd++) {
-      fs.symlinkSync(
-        pid === 150 && fd === 0 ? 'socket:[4242]' : '/dev/null',
-        path.join(procRoot, `${pid}/fd/${fd}`)
-      )
+      procLink(pid === 150 && fd === 0 ? 'socket:[4242]' : '/dev/null', `proc/${pid}/fd/${fd}`)
     }
   }
   const readdir = vi.spyOn(fs.promises, 'readdir')
@@ -229,6 +236,10 @@ it('does not enumerate processes for missing sockets and skips unrelated file de
   )
   expect(results).toEqual(Array(8).fill(150))
   expect(readdir.mock.calls.filter(([dir]) => dir === procRoot)).toHaveLength(1)
-  expect(readlink.mock.calls.filter(([file]) => String(file).includes('/fd/'))).toHaveLength(20)
-  expect(readlink.mock.calls.filter(([file]) => String(file).endsWith('/exe'))).toHaveLength(51)
+  expect(
+    readlink.mock.calls.filter(([file]) => String(file).includes(`${path.sep}fd${path.sep}`))
+  ).toHaveLength(20)
+  expect(
+    readlink.mock.calls.filter(([file]) => path.basename(String(file)) === 'exe')
+  ).toHaveLength(51)
 })
