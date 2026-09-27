@@ -100,7 +100,7 @@ const ConnectionItemComponent: React.FC<Props> = ({
                 showFallback
                 fallback={<img src={fallbackIcon} alt="" className="w-full h-full object-cover" />}
                 classNames={{ fallback: 'w-full h-full' }}
-                className="bg-transparent ml-2 w-14 h-14"
+                className="bg-transparent ml-2 w-12 h-12"
               />
             </div>
           )}
