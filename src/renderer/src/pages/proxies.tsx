@@ -833,7 +833,7 @@ const Proxies: React.FC = () => {
       title={t('proxies.title')}
       header={
         <>
-          <Dropdown placement="bottom-end">
+          <Dropdown placement="bottom-end" closeOnSelect={false}>
             <DropdownTrigger>
               <Button
                 size="sm"
