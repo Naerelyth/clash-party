@@ -8,6 +8,7 @@ export interface LinuxProcessIdentity {
   parentPid: number
   cgroup: string
   appImagePath?: string
+  desktopFilePath?: string
 }
 
 interface SocketSnapshot {
@@ -264,6 +265,10 @@ export async function getProcessIdentity(
     appImagePath: environment
       .split('\0')
       .find((entry) => entry.startsWith('APPIMAGE='))
-      ?.slice(9)
+      ?.slice(9),
+    desktopFilePath: environment
+      .split('\0')
+      .find((entry) => entry.startsWith('GIO_LAUNCHED_DESKTOP_FILE='))
+      ?.slice('GIO_LAUNCHED_DESKTOP_FILE='.length)
   }
 }
