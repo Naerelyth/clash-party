@@ -192,11 +192,83 @@ it('distinguishes shared helper connections by socket owner and parent cgroup', 
   write('proc/100/cgroup', '')
   write('proc/100/environ', `APPIMAGE=${root}/Example.AppImage\0`)
   expect((await getLinuxAppInfo(metadata)).name).toBe('AppImage')
+  write('proc/100/environ', '')
+  procLink('/app/bin/sandbox', 'proc/100/exe')
   write('proc/100/cgroup', '0::/user.slice/app.slice/app-flatpak-org.example.Sandbox-42.scope\n')
   expect((await getLinuxAppInfo(metadata)).name).toBe('Flatpak')
   expect(await findPid({ ...metadata, uid: 1001 }, procRoot)).toBeUndefined()
   expect(await findPid({ ...metadata, sourceIP: '192.168.0.1' }, procRoot)).toBeUndefined()
 })
+
+it.each(['', '0::/user.slice/app.slice/app-gnome-org.example.FileManager-100.scope\n'])(
+  'uses the GIO desktop hint for binary launchers with scope %j',
+  async (cgroup) => {
+    const procRoot = path.join(root, 'proc')
+    const icon = write('editor.svg', '<svg/>')
+    const file = desktop(
+      'nested/org.example.Editor',
+      `Name=Editor\nExec=/opt/example/launcher\nIcon=${icon}`
+    )
+    desktop('org.example.FileManager', 'Name=File Manager\nExec=/opt/example/file-manager')
+    write('proc/123/stat', '123 (editor) S 100')
+    write('proc/123/cgroup', cgroup)
+    write('proc/123/environ', `GIO_LAUNCHED_DESKTOP_FILE=${file}\0`)
+    procLink('/opt/example/editor', 'proc/123/exe')
+    const processes = await import('./linux-process')
+    vi.spyOn(processes, 'findConnectionPid').mockResolvedValue(123)
+    const identity = processes.getProcessIdentity
+    const getIdentity = vi
+      .spyOn(processes, 'getProcessIdentity')
+      .mockImplementation((pid) => identity(pid, procRoot))
+    const { getLinuxAppInfo } = await import('./linux')
+    expect(await getLinuxAppInfo({ processPath: '/opt/example/editor' })).toEqual({
+      name: 'Editor',
+      icon: `data:image/svg+xml;base64,${Buffer.from('<svg/>').toString('base64')}`
+    })
+    expect(getIdentity).toHaveBeenCalledTimes(1)
+    // A later application can inherit the hint as well; its own executable wins.
+    procLink('/opt/example/file-manager', 'proc/123/exe')
+    expect((await getLinuxAppInfo({})).name).toBe('File Manager')
+    // Only known, enabled desktop entries are accepted; do not read arbitrary hint paths.
+    write('proc/123/cgroup', '')
+    procLink('/opt/example/editor', 'proc/123/exe')
+    write('proc/123/environ', 'GIO_LAUNCHED_DESKTOP_FILE=/tmp/org.example.Editor.desktop\0')
+    expect(await getLinuxAppInfo({})).toEqual({ name: '', icon: '' })
+  }
+)
+
+it('matches the connection executable before unrelated ancestor identities without proc scans', async () => {
+  desktop('app', 'Name=App\nExec=/opt/app')
+  const processes = await import('./linux-process')
+  const findPid = vi.spyOn(processes, 'findConnectionPid').mockResolvedValue(123)
+  const getIdentity = vi.spyOn(processes, 'getProcessIdentity').mockResolvedValue({
+    executablePath: '/opt/example/file-manager',
+    parentPid: 1,
+    cgroup: ''
+  })
+  const { getLinuxAppInfo } = await import('./linux')
+  expect((await getLinuxAppInfo({ processPath: '/opt/app' })).name).toBe('App')
+  expect(findPid).not.toHaveBeenCalled()
+  expect(getIdentity).not.toHaveBeenCalled()
+})
+
+it.each(['cgroup', 'hint'])(
+  'resolves shared executables through %s instead of the first desktop entry',
+  async (source) => {
+    desktop('one', 'Name=One\nExec=/usr/bin/python3 /opt/one.py')
+    const file = desktop('two', 'Name=Two\nExec=/usr/bin/python3 /opt/two.py')
+    const processes = await import('./linux-process')
+    vi.spyOn(processes, 'findConnectionPid').mockResolvedValue(123)
+    vi.spyOn(processes, 'getProcessIdentity').mockResolvedValue({
+      executablePath: '/usr/bin/python3',
+      parentPid: 1,
+      cgroup: source === 'cgroup' ? '0::/user.slice/app.slice/app-gnome-two-123.scope' : '',
+      desktopFilePath: source === 'hint' ? file : undefined
+    })
+    const { getLinuxAppInfo } = await import('./linux')
+    expect((await getLinuxAppInfo({ processPath: '/usr/bin/python3' })).name).toBe('Two')
+  }
+)
 
 it('falls back safely for inaccessible processes, missing entries and non-Linux hosts', async () => {
   const { getLinuxAppInfo } = await import('./linux')

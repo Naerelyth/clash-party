@@ -80,7 +80,11 @@ async function loadSnapshot(): Promise<{ entries: Map<string, Entry>; iconDirs: 
     for (const file of files.filter((file) => file.endsWith('.desktop'))) {
       const id = file.replaceAll(path.sep, '-').slice(0, -8)
       if (entries.has(id)) continue
-      entries.set(id, getIniSection(await read(path.join(directory, file)), 'Desktop Entry'))
+      const desktopFilePath = path.resolve(directory, file)
+      entries.set(id, {
+        ...getIniSection(await read(desktopFilePath), 'Desktop Entry'),
+        desktopFilePath
+      })
     }
   }
   for (const [id, entry] of entries) {
@@ -212,20 +216,17 @@ async function findEntry(
 ): Promise<Entry | undefined> {
   if (!appPath && !processName) return undefined
   const executable = appPath ? await resolveCommand(appPath) : ''
-  let hidden: Entry | undefined
-  for (const entry of entries.values()) {
-    if (
+  const matches = [...entries.values()].filter(
+    (entry) =>
       (executable &&
         (entry.executable === executable || entry.targets.split('\0').includes(executable))) ||
       (processName &&
         (entry.StartupWMClass === processName || entry['X-GNOME-WMClass'] === processName))
-    ) {
-      // File handlers can share the executable with the app's normal launcher.
-      if (entry.NoDisplay !== 'true') return entry
-      hidden ||= entry
-    }
-  }
-  return hidden
+  )
+  // Prefer the normal launcher, but shared runtimes need process-specific evidence.
+  const visible = matches.filter((entry) => entry.NoDisplay !== 'true')
+  const candidates = visible.length ? visible : matches
+  return candidates.length === 1 ? candidates[0] : undefined
 }
 
 export async function getLinuxAppInfo(
@@ -233,12 +234,19 @@ export async function getLinuxAppInfo(
 ): Promise<IAppInfo> {
   if (process.platform !== 'linux') return { name: '', icon: '' }
   const { entries, iconDirs } = await getSnapshot()
-  let entry: Entry | undefined
-  const pid = await findConnectionPid(metadata)
+  let entry = await findEntry(entries, metadata.processPath || '', metadata.process)
+  const pid = entry ? undefined : await findConnectionPid(metadata)
   let currentPid = pid || 0
   for (let depth = 0; currentPid > 1 && depth < 16; depth++) {
     const identity = await getProcessIdentity(currentPid)
     if (!identity) break
+    // A launcher/terminal's scope can be inherited by a different application.
+    entry = identity.appImagePath ? await findEntry(entries, identity.appImagePath) : undefined
+    entry ||= await findEntry(entries, identity.executablePath)
+    entry ||= identity.desktopFilePath
+      ? [...entries.values()].find((item) => item.desktopFilePath === identity.desktopFilePath)
+      : undefined
+    if (entry) break
     // Same app scope convention used by Resources (lib/process_data/src/cgroup.rs).
     const id = identity.cgroup
       .match(
@@ -248,12 +256,9 @@ export async function getLinuxAppInfo(
     entry = id
       ? entries.get(id) || [...entries.values()].find((item) => item['X-Flatpak'] === id)
       : undefined
-    entry ||= identity.appImagePath ? await findEntry(entries, identity.appImagePath) : undefined
-    entry ||= await findEntry(entries, identity.executablePath)
     if (entry) break
     currentPid = identity.parentPid
   }
-  entry ||= await findEntry(entries, metadata.processPath || '', metadata.process)
   if (!entry) return { name: '', icon: '' }
   const locale = (process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || '').replace(
     /\.[^@]*/,
